@@ -48,27 +48,29 @@ plot_map(real_map,true)
 
 
 %% breath_first_search
-% start = [13];
+% start = 13;
 % goal = 97; 
 % map = real_map;
 % 
 % queue = start;
 % % Tracks where an element came from. First element is current node, 2nd 
 % % element is where node came from
-% came_from = [start, 0];
+% came_from = containers.Map(start, 13);
 % 
 % while ~isempty(queue)
-%     current = queue(1);
+%     current = queue(1); %grab highest priority node and pop it off
 %     queue = queue(2:end);
 %     
-%     if current == goal
+%     if current == goal %early exit
 %        break  
 %     end
-%     for next = find_neighbors(map,current)
-%         previous_nodes = came_from(:,1);
+%     
+%     neighbors = find_neighbors(map,current);
+%     for next = neighbors(:,1)'
+%         previous_nodes = cell2mat(keys(came_from));
 %         if isempty(find( next == previous_nodes,1 ))
 %             queue(end+1) = next;
-%             came_from = [came_from; [next current]];
+%             came_from(next) = current;
 %         end
 %     end 
 % end
@@ -79,9 +81,11 @@ plot_map(real_map,true)
 % axis equal
 % xlim([0, n-1]);
 % ylim([0, n-1]);
-% for i = 2:size(came_from,1)
-%     p1 = map.coords(:,:,came_from(i,2));
-%     p2 = map.coords(:,:,came_from(i,1));
+% 
+% came_from_keys = cell2mat(keys(came_from));
+% for i = 1:length(came_from)
+%     p1 = map.coords(:,:,came_from(came_from_keys(i)));
+%     p2 = map.coords(:,:,came_from_keys(i));
 %     dp = p2 - p1;
 %     quiver( p1(1), p1(2), dp(1), dp(2),'b','MaxHeadSize',1);
 % end
@@ -92,7 +96,8 @@ plot_map(real_map,true)
 % current = goal;
 % while current ~= start
 %     path(end+1) = current;
-%     current = came_from(find(current == came_from(:,1)),2);
+%     index = find(current == came_from_keys);
+%     current = came_from(came_from_keys(index));
 % end
 % path(end+1) = current;
 % path = flip(path);
@@ -108,6 +113,7 @@ plot_map(real_map,true)
 %     quiver( p1(1), p1(2), dp(1), dp(2),'b','MaxHeadSize',1);
 % end
 
+
 %% Dijkstra’s Algorithm with equal weights
 start = 13;
 goal = 97; 
@@ -116,20 +122,23 @@ map = real_map;
 queue = start;
 % Tracks where an element came from. First element is current node, 2nd 
 % element is where node came from
-came_from = [start, 0];
+came_from = containers.Map(start, 13);
+cost_so_far = containers.Map(start, 13);
 
 while ~isempty(queue)
-    current = queue(1);
+    current = queue(1); %grab highest priority node and pop it off
     queue = queue(2:end);
     
-    if current == goal
+    if current == goal %early exit
        break  
     end
-    for next = find_neighbors(map,current)
-        previous_nodes = came_from(:,1);
+    
+    neighbors = find_neighbors(map,current);
+    for next = neighbors(:,1)'
+        previous_nodes = cell2mat(keys(came_from));
         if isempty(find( next == previous_nodes,1 ))
             queue(end+1) = next;
-            came_from = [came_from; [next current]];
+            came_from(next) = current;
         end
     end 
 end
@@ -140,9 +149,11 @@ hold on;
 axis equal
 xlim([0, n-1]);
 ylim([0, n-1]);
-for i = 2:size(came_from,1)
-    p1 = map.coords(:,:,came_from(i,2));
-    p2 = map.coords(:,:,came_from(i,1));
+
+came_from_keys = cell2mat(keys(came_from));
+for i = 1:length(came_from)
+    p1 = map.coords(:,:,came_from(came_from_keys(i)));
+    p2 = map.coords(:,:,came_from_keys(i));
     dp = p2 - p1;
     quiver( p1(1), p1(2), dp(1), dp(2),'b','MaxHeadSize',1);
 end
@@ -153,7 +164,8 @@ path = [];
 current = goal;
 while current ~= start
     path(end+1) = current;
-    current = came_from(find(current == came_from(:,1)),2);
+    index = find(current == came_from_keys);
+    current = came_from(came_from_keys(index));
 end
 path(end+1) = current;
 path = flip(path);
@@ -212,15 +224,16 @@ function [new_map] = add_roadblock(map,x)
 end
 
 function [neighbors] = find_neighbors(map,node)
-    %finds neighbors next to node
+    %finds neighbors next to node (1st column)
+    %also returns the cost of travel (2nd column)
     neighbors = [];
     for i = 1:size(map.edges,1)
         if map.edges(node,i) == 1
-            neighbors(end+1) = i;
+            neighbors(end+1,:) = [i 1];
         end
     end
 end
 
-function [queue] = put_queue(t)
-
+function [queue] = priority_queue(node, priority)
+    
 end
