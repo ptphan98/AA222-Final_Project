@@ -1,10 +1,10 @@
 close all;
-map = struct(); 
 
-%% create nodes, definite coordinates, and add roadblocks
-global n
+%% Define the grid map
+global n void
 n = 11;
-map.nodes = 1:n*n; %create a 11x11 grid
+map = struct(); 
+map.nodes = 1:n*n; %create a nxn grid
 map.coords = zeros(1,2,length(map.nodes)); 
 
 %define a coordinate at each node. lowest at bottom left corner. Increase
@@ -33,37 +33,111 @@ for i = 1:length(map.nodes)
     end
 end
 
+%define costs - Assume all roads have equal costs
 map.costs = ones(length(map.nodes),length(map.nodes));
 
-
-%add roadblocks + costs
+%add roadblocks 
 roadblocks = [72 61;
               61 50;
               60 61;
               61 62;
               50 39;
-              17 18];
-real_map = add_roadblock(map,roadblocks);
+              17 18;
+              49 50;
+              50 51];
+void = [61 50]; %values we can never reach. Need to specify or A* will crash
+
+map = add_roadblock(map,roadblocks);
+
+%Define routes
+%Each row represents a separate route. 1st column is start, 2nd column is
+%end, 3rd column is weight
+routes = [21 101 1]; 
 
 %check 
-plot_map(real_map,true)
+plot_map(map,true)
 
 
-%% Find optimal path
-start = 13;
-goal = 97; 
-path = A_star(start, goal, real_map);
-plot_path(real_map, path)
+%% Form and solve objective function
+routes = [107 101 1;
+          57 13 1;
+          21 76 1]; 
+n_stations = 3;     
+      
+A = [];
+B = [];
+Aeq = [];
+Beq = [];
+lb =[1 1 1 ];
+ub =[121 121 121];
+x = ga(@(x) objective_function(map,routes,x),n_stations,A,B,Aeq,Beq,lb,ub);
+fuel_stops = round(x); %locations must be discrete
 
+cost = objective_function(map,routes,fuel_stops)
 
+%plot solution
+plot_solution(map,routes,fuel_stops)
 
-%% functions
+%% Define Objective Function
+
+function [total_distance] = objective_function(map, routes, fuel_stops)
+    global void
+    
+    %fuel_stops is an array that contains node locations
+    fuel_stops = round(fuel_stops); %discrete optimization. Round to nearest whole number
+    
+    %check if fuel_stops are at valid locations
+    valid = true;
+    for i = 1:length(fuel_stops)
+        if ~isempty( find(void == fuel_stops(i),1) )
+            valid = false;
+        end
+    end
+    
+    if valid
+        total_distance = 0;
+        for i = 1:size(routes,1)
+            distance = route_distance(map, routes(i,1), routes(i,2), fuel_stops);
+            total_distance = total_distance + distance*routes(i,3);
+        end
+    else
+        total_distance = 99999999;
+    end
+end
+
+function [distance, path] = route_distance(map, point_a, point_b, fuel_stops)
+    %Assume in order for a truck to complete any route, it must stop at a
+    %fuel station along the way.
+    
+    %calculate all permutations of fuel stops - save the shortest
+    shortest_path = []; 
+    shortest_dist = [];
+    for i = 1:length(fuel_stops)
+        path_a2f = A_star(point_a, fuel_stops(i), map);
+        path_f2b = A_star(fuel_stops(i), point_b, map);
+        path = [path_a2f path_f2b];
+        distance = length(path)-1; %number of edges required to complete path
+        if i == 1 %store the first element
+           shortest_path = path; 
+           shortest_dist = distance;
+        end
+        if distance < shortest_dist %check if a new path is shorter
+           shortest_path = path; 
+           shortest_dist = distance;
+        end
+    end
+    distance = shortest_dist;
+    path = shortest_path;
+end
+
+%% A_star functions
 function [path] = A_star(start, goal, map)
     global n
-    queue = [start 0];
+   
+    queue = [start start];
     % Tracks where an element came from. First element is current node, 2nd 
     % element is where node came from
-    came_from = containers.Map(start, 13);
+    came_from = containers.Map(start, start);
     cost_so_far = containers.Map(start, 0);
 
     while ~isempty(queue)
@@ -88,20 +162,8 @@ function [path] = A_star(start, goal, map)
             end
         end 
     end
-
-    %plot the expansion
-    figure;
-    hold on;
-    axis equal
-    xlim([0, n-1]);
-    ylim([0, n-1]);
+    
     came_from_keys = cell2mat(keys(came_from));
-    for i = 1:length(came_from)
-        p1 = map.coords(:,:,came_from(came_from_keys(i)));
-        p2 = map.coords(:,:,came_from_keys(i));
-        dp = p2 - p1;
-        quiver( p1(1), p1(2), dp(1), dp(2),'b','MaxHeadSize',1);
-    end
 
     %find path to a goal
     path = [];
@@ -109,21 +171,95 @@ function [path] = A_star(start, goal, map)
     current = goal;
     while current ~= start
         path(end+1) = current;
-        index = find(current == came_from_keys);
+        index = current == came_from_keys;
         current = came_from(came_from_keys(index));
     end
     path(end+1) = current;
     path = flip(path);
+    
+    %plot the expansion - helpful for debugging
+%     if isempty( find( index == 1))
+%         figure;
+%         hold on;
+%         axis equal
+%         xlim([0, n-1]);
+%         ylim([0, n-1]);
+%         for i = 1:length(came_from)
+%             p1 = map.coords(:,:,came_from(came_from_keys(i)));
+%             p2 = map.coords(:,:,came_from_keys(i));
+%             dp = p2 - p1;
+%             quiver( p1(1), p1(2), dp(1), dp(2),'b','MaxHeadSize',1);
+%         end
+%     end
 end
 
-function [] = plot_path(map, path)
+function [neighbors] = find_neighbors(map,node)
+    %finds neighbors next to node (1st column)
+    %also returns the cost of travel (2nd column)
+    neighbors = [];
+    for i = 1:size(map.edges,1)
+        if map.edges(node,i) == 1
+            neighbors(end+1,:) = [i map.costs(node,i)];
+        end
+    end
+end
+
+function [new_queue] = priority_queue(queue, node, priority)
+    new_queue = [queue; node priority];
+    new_queue = sortrows(new_queue, 2);
+end
+
+function [distance] = heuristic(map,node,goal)
+    p1 = map.coords(:,:,node);
+    p2 = map.coords(:,:,goal);
+    distance = abs(p1(1)-p2(1)) + abs(p1(2)-p2(2));
+end
+
+%% Plotting Functions
+
+function [] = plot_solution(map,routes,fuel_stops)
+
     plot_map(map,false)
+    route_colors = ['ob'; 'og'; 'or'; 'ok'; 'om'; 'oc'; 'oy'];
+    route_colors2 = ['b'; 'g'; 'r'; 'k'; 'm'; 'c'; 'y'];
+    for i = 1:size(routes,1)
+        plot_route(map, routes(i,:), route_colors(i,:))
+        [distance, path] = route_distance(map, routes(i,1), routes(i,2), fuel_stops);
+        plot_path(map, path, route_colors2(i,:))
+    end
+
+    for i = 1:length(fuel_stops)
+        plot_fuel(map,fuel_stops(i),'*k')
+    end
+
+end
+
+
+function [] = plot_path(map, path, color)
+    %expects p
     for i = 2:length(path)
         p1 = map.coords(:,:,path(i-1));
         p2 = map.coords(:,:,path(i));
         dp = p2 - p1;
-        quiver( p1(1), p1(2), dp(1), dp(2),'b','MaxHeadSize',1);
+        quiver( p1(1), p1(2), dp(1), dp(2),color,'MaxHeadSize',1);
     end
+end
+
+function [] = plot_route(map, routes, color)
+    %expect routes to be only one row
+    p1 = map.coords(:,:,routes(1));
+    p2 = map.coords(:,:,routes(2));
+    plot(p1(1),p1(2),color,'MarkerSize',10,'LineWidth',2);
+    text(p1(1)+0.1,p1(2)+0.1,'Start','VerticalAlignment','bottom','HorizontalAlignment','left')
+    plot(p2(1),p2(2),color,'MarkerSize',10,'LineWidth',2);
+    text(p2(1)+0.1,p2(2)+0.1,'End','VerticalAlignment','bottom','HorizontalAlignment','left')
+end
+
+function [] = plot_fuel(map, fuel_stop, color)
+    %expect routes to be only one row
+    p1 = map.coords(:,:,fuel_stop(1));
+    plot(p1(1),p1(2),color,'MarkerSize',10,'LineWidth',2);
+    text(p1(1)+0.1,p1(2)+0.1,'Fuel','VerticalAlignment','bottom','HorizontalAlignment','left')
 end
 
 function [] = plot_map(map,label_node)
@@ -153,6 +289,8 @@ function [] = plot_map(map,label_node)
     end
 end
 
+%% Map functions
+
 function [new_map] = add_roadblock(map,x)
     %adds a road block between nodes
     %expects x to be an N x 2 matrix, with each row corresponding to
@@ -179,24 +317,3 @@ function [new_map] = add_cost(map,x,cost)
     end
 end
 
-function [neighbors] = find_neighbors(map,node)
-    %finds neighbors next to node (1st column)
-    %also returns the cost of travel (2nd column)
-    neighbors = [];
-    for i = 1:size(map.edges,1)
-        if map.edges(node,i) == 1
-            neighbors(end+1,:) = [i map.costs(node,i)];
-        end
-    end
-end
-
-function [new_queue] = priority_queue(queue, node, priority)
-    new_queue = [queue; node priority];
-    new_queue = sortrows(new_queue, 2);
-end
-
-function [distance] = heuristic(map,node,goal)
-    p1 = map.coords(:,:,node);
-    p2 = map.coords(:,:,goal);
-    distance = abs(p1(1)-p2(1)) + abs(p1(2)-p2(2));
-end
